@@ -48,7 +48,7 @@ pub mod pallet {
 		},
 		ContractDeployed {
 			contract_pubkey: ContractPublicKey,
-			worker_pubkey: WorkerPublicKey,
+			worker_pubkeys: Vec<WorkerPublicKey>,
 		},
 	}
 
@@ -109,7 +109,8 @@ pub mod pallet {
 		StorageMap<_, Twox64Concat, ContractPublicKey, ContractInfo<CodeHash<T>, T::AccountId>>;
 
 	#[pallet::storage]
-	pub type ContractWorkers<T> = StorageMap<_, Twox64Concat, ContractPublicKey, WorkerPublicKey>;
+	pub type ContractWorkers<T> =
+		StorageMap<_, Twox64Concat, ContractPublicKey, Vec<WorkerPublicKey>>;
 
 	// TODO(shelven): remove this
 	/// Mapping from contract address to pubkey
@@ -387,7 +388,7 @@ pub mod pallet {
 			code_index: CodeIndex<CodeHash<T>>,
 			data: Vec<u8>,
 			salt: Vec<u8>,
-			deploy_worker: WorkerPublicKey,
+			deploy_workers: Vec<WorkerPublicKey>,
 		) -> DispatchResult {
 			let deployer = ensure_signed(origin)?;
 
@@ -401,8 +402,12 @@ pub mod pallet {
 				}
 			}
 
-			let worker_info =
-				Workers::<T>::try_get(&deploy_worker).or(Err(Error::<T>::WorkerNotFound))?;
+			let mut workers = Vec::new();
+			for worker in deploy_workers.into_iter() {
+				let worker_info =
+					Workers::<T>::try_get(&worker).or(Err(Error::<T>::WorkerNotFound))?;
+				workers.push((worker_info.pubkey, worker_info.ecdh_pubkey));
+			}
 
 			let cluster_id = ContractClusterCounter::<T>::mutate(|counter| {
 				*counter += 1;
@@ -416,10 +421,7 @@ pub mod pallet {
 				code_index,
 				instantiate_data: data,
 			};
-			Self::push_message(ContractEvent::instantiate_code(
-				contract_info,
-				(worker_info.pubkey, worker_info.ecdh_pubkey),
-			));
+			Self::push_message(ContractEvent::instantiate_code(contract_info, workers));
 
 			Ok(())
 		}
@@ -616,9 +618,9 @@ pub mod pallet {
 				}
 				ContractRegistryEvent::ContractDeployed {
 					contract_pubkey,
-					worker_pubkey,
+					worker_pubkeys,
 				} => {
-					ContractWorkers::<T>::insert(&contract_pubkey, &worker_pubkey);
+					ContractWorkers::<T>::insert(&contract_pubkey, &worker_pubkeys);
 				}
 			}
 			Ok(())
